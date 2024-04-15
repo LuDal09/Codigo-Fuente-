@@ -1,0 +1,218 @@
+﻿###  Cargar bibliotecas
+library(tseries)
+library(forecast)
+library(readxl)
+library(RcmdrMisc)
+library(ggplot2)
+library(ggfortify)
+library(dplyr)
+library(TSstudio)
+
+### Cargar datos
+### Gasto_consumo_final
+PIB <- datos <- tibble::tibble(
+  Gasto_consumo_final = c(96900.66, 100299.07, 102456.22, 119421.05, 102567.30, 105947.58, 109311.71, 127116.41, 
+                          108529.43, 111687.30, 116754.42, 135619.85, 114519.18, 116868.19, 120743.60, 140376.02, 
+                          117333.11, 119945.91, 123152.89, 142984.08, 121867.24, 125486.61, 129940.09, 151708.06, 
+                          127530.45, 133552.53, 137060.17, 160849.85, 136391.45, 140513.86, 144319.28, 168469.42, 
+                          142956.89, 148874.12, 151676.55, 177758.44, 149815.22, 154693.03, 157924.26, 185701.48, 
+                          155937.52, 161489.49, 166410.95, 186363.05, 158703.52, 163876.87, 166684.92, 191835.70, 
+                          160624.23, 168339.10, 171648.61, 196361.06, 166449.16, 175485.16, 178484.88, 204228.80, 
+                          171948.54, 179123.08, 186603.18, 214473.48, 179123.08, 156667.45, 172894.66, 216037.81, 
+                          184107.15, 192996.42, 204812.30, 241416.14, 203437.61, 219508.76, 219715.68, 245471.86, 
+                          208903.20, 221718.37),
+  Dia = c(31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 
+          30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 
+          31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30, 31, 31, 30, 30),
+  Mes = c(3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 
+          3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 3, 6, 9, 12, 
+          3, 6, 9, 12, 3, 6, 9, 12),
+  Año = c(2005, 2005, 2005, 2005, 2006, 2006, 2006, 2006, 2007, 2007, 2007, 2007, 2008, 2008, 2008, 2008, 2009, 
+          2009, 2009, 2009, 2010, 2010, 2010, 2010, 2011, 2011, 2011, 2011, 2012, 2012, 2012, 2012, 2013, 2013, 
+          2013, 2013, 2014, 2014, 2014, 2014, 2015, 2015, 2015, 2015, 2016, 2016, 2016, 2016, 2017, 2017, 2017, 
+          2017, 2018, 2018, 2018, 2018, 2019, 2019, 2019, 2019, 2020, 2020, 2020, 2020, 2021, 2021, 2021, 2021, 
+          2022, 2022, 2022, 2022, 2023, 2023),
+  t = c(1:74))
+
+sc <- tsclean(ts(PIB$Gasto_consumo_final, start = c(2005, 1), frequency = 4))
+
+
+### Análisis de tendencia
+numSummary(PIB[,'Gasto_consumo_final'], groups = PIB$Año,
+           statistic = c('mean', 'sd', 'cv', 'quantiles'), quantiles = c(0.25, 0.5, 0.75))
+
+### Gráfico de la serie temporal
+ts_plot(sc, title = "",
+        Ytitle = "Gasto Consumo Final",
+        Xtitle = "",
+        slider = TRUE,
+        line.mode = "lines+markers")
+
+### Estacionalidad 
+ts_seasonal(sc, type = "normal", title = "",
+            Ygrid = TRUE, Xgrid = TRUE, last = NULL,
+            palette = "Set1", palette_normal = "viridis")
+
+
+### Ciclo 
+ggplot(PIB, aes(x=as.factor(Año), y=PIB$Gasto_consumo_final, fill=as.factor(Año))) + 
+  geom_boxplot(alpha=0.7) +
+  theme(legend.position="none")+xlab('Mes')
+
+
+### Enfoque clásico
+### Escoger el modelo multiplicativo
+Percent <- PIB %>% 
+  group_by(as.factor(PIB$Año)) %>% 
+  do(data.frame(t(quantile(.$Gasto_consumo_final, probs = c(0.2, .5, .80)))))
+
+plot(log(Percent$X50.), log(Percent$X80. - Percent$X20.), xlab = 'Nivel', ylab = 'Dispersión', col = 'red')
+
+
+
+### Particionamos los datos para cada horizonte de pronostico 
+h <- 2:5
+PIB_split <- lapply(h, function(x) ts_split(sc, sample.out = x))
+
+### Datos de entrenamiento y prueba
+train <- lapply(PIB_split, function(x) x$train)
+test <- lapply(PIB_split, function(x) x$test)
+
+invisible(lapply(train, ts_info))
+invisible(lapply(test, ts_info))
+
+
+### Descomposición de la serie temporal
+### Estimación de la tendencia
+M.t <- lapply(1:5, function(i) ma(sc, order = i, centre = T))
+lapply(M.t, autoplot)
+autoplot(M.t[[1]])
+
+
+### Usando datos de entrenamiento
+### Descomposición y ajuste de modelo multiplicativo
+desc.m <- lapply(train, function(x) decompose(x, "multiplicative"))
+lapply(desc.m, autoplot)
+autoplot(desc.m[[4]])
+
+autoplot(desc.m[[4]], series = "Trend") +
+  labs(title = "Descomposición Multiplicativa: Modelo 4",
+       y = "Valor",
+       x = "Tiempo") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 16, face = "bold"),
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10),
+        legend.position = "none")
+
+
+
+
+
+
+
+# Ajuste del modelo clasico yt = St * Tt * Et 
+models <- lapply(desc.m, function(desc) {
+  list(
+    trend = desc$trend,
+    seasonal = desc$seasonal,
+    random = desc$random,
+    fitted = desc$trend * desc$seasonal * desc$random
+  )
+})
+
+
+sc.e <- lapply(models, function(model) model$fitted)
+y_real <- lapply(desc.m, `[[`, "x")
+### Verificamos igualdad 
+stopifnot(length(sc.e) == length(y_real))
+
+
+### Limpiar 
+cleaned_real_series <- lapply(y_real, function(x) x[complete.cases(x)])
+cleaned_fitted_series <- lapply(sc.e, function(x) x[complete.cases(x)])
+stopifnot(all(sapply(cleaned_real_series, function(x) all(is.finite(x)))))
+stopifnot(all(sapply(cleaned_fitted_series, function(x) all(is.finite(x)))))
+
+### Graficar
+### Retrocede en plots para ver las graficas anteriores 
+for (i in seq_along(cleaned_fitted_series)) {
+  plot(cleaned_real_series[[i]], type = "l", col = "blue", ylim = range(c(cleaned_real_series[[i]], cleaned_fitted_series[[i]]), na.rm = TRUE),
+       xlab = "Observaciones", ylab = "Valor", main = paste("Comparación de valores reales y ajustados - Modelo", i))
+  lines(cleaned_fitted_series[[i]], col = "red")
+  legend("topleft", legend = c("Real", "Ajustado"), col = c("blue", "red"), lty = 1, cex = 0.6)
+}
+
+
+
+### Ajuste del modelo
+models <- lapply(1:4, function(i) lm(Gasto_consumo_final ~ t, data = PIB[1:length(train[[i]]), ]))
+lapply(models, summary)
+checkresiduals(models[[4]])
+
+models[[4]]
+
+### Pronósticos de la tendencia para los datos de prueba
+n = length(sc)
+n.entre=n-h
+Tt.e <- lapply(1:4, function(i) predict(models[[i]], newdata = PIB[(length(train[[i]]) + 1):n, ]))
+
+
+
+### Obtener pronósticos considerando el modelo multiplicativo
+invisible(lapply(test, ts_info))
+
+St.e <- list(St.e1 = desc.m[[2]]$figure[c(1, 2)],
+             St.e2 = desc.m[[3]]$figure[c(4, 1, 2)],
+             St.e3 = desc.m[[4]]$figure[c(3, 4, 1, 2)], 
+             St.e3 = desc.m[[4]]$figure[c(2, 3, 4, 1, 2)]); St.e
+
+
+### Modelo ajustados para los datos de prueba Yt.est = * Tt.e * Ste
+yt.est <- Map("*", Tt.e, St.e)
+
+y.realp <- lapply(n.entre, function(n_range) {
+  PIB$Gasto_consumo_final[(n_range + 1):n]
+})
+
+###--------------------###
+
+
+### Grafico
+## par(mfrow = c(3, 1))
+for (i in 1:4) {
+  plot(y.realp[[i]], type = "o", col = "blue", ylim = range(c(y.realp[[i]], yt.est[[i]])),
+       xlab = "Observaciones", ylab = "Valor", main = paste("Comparación de valores reales y estimados - Modelo", i))
+  lines(yt.est[[i]], type = "o", col = "red")
+  text(seq_along(y.realp[[i]]), y.realp[[i]], labels = round(y.realp[[i]], digits = 1), pos = 3, col = "blue", cex = 0.4)
+  text(seq_along(yt.est[[i]]), yt.est[[i]], labels = round(yt.est[[i]], digits = 1), pos = 3, col = "red", cex = 0.4)
+}
+## par(mfrow = c(1, 1))
+
+### Metricas Datos de prueba
+accuracy_prueba <- lapply(1:4, function(i) accuracy(yt.est[[i]], y.realp[[i]]))
+names(accuracy_prueba) <- paste("Modelo", 1:4)
+accuracy_prueba
+accuracy(yt.est[[1]],  y.realp[[1]])
+
+
+### Datos de entrenamiento
+y.real.e <- lapply(1:4, function(i) {
+  inicio <- (h[i] / 2) + 1
+  fin <- n.entre[i] - (h[i] / 2)
+  return(PIB$Gasto_consumo_final[inicio:fin])
+})
+accuracy_entre <- lapply(1:4, function(i) accuracy(sc.e[[i]], y.real.e[[i]]))
+names(accuracy_entre) <- paste("Modelo", 1:4)
+accuracy_entre
+
+
+
+### Diagnostico 
+
+normalidad <- lapply(1:4, function(i) shapiro.test(resid(models[[i]])))
+homocedasticidad <- lapply(1:4, function(i) bptest(models[[i]]))
+independencia <- lapply(1:4, function(i) dwtest(models[[i]]))
+
+
+
